@@ -673,7 +673,7 @@ const TABS = [
 const MENU = [
   { grp: '业务', items: [{ r: '/repair', i: 'fa-wrench', t: '待修' }, { r: '/schedule', i: 'fa-calendar-check', t: '日程' }, { r: '/flow', i: 'fa-arrows-left-right-to-line', t: '流水' }, { r: '/customers', i: 'fa-users', t: '客户' }, { r: '/engineer-stats', i: 'fa-users-gear', t: '工程师' }, { r: '/ai-chat', i: 'fa-comments', t: '问青龙' }] },
   { grp: '管理', items: [{ r: '/cost', i: 'fa-coins', t: '成本与保本' }, { r: '/cash', i: 'fa-water', t: '现金流预警' }, { r: '/stock-alert', i: 'fa-triangle-exclamation', t: '库存预警' }, { r: '/slow', i: 'fa-hourglass-half', t: '滞销设备' }, { r: '/store-expense', i: 'fa-store', t: '店铺开支' }, { r: '/accounts', i: 'fa-user-gear', t: '账号管理' }, { r: '/audit-logs', i: 'fa-scroll', t: '操作日志' }, { r: '/settings', i: 'fa-gear', t: '同步与备份' }] },
-  { grp: '运营', items: [{ r: '/platform', i: 'fa-chart-simple', t: '平台运营' }, { r: '/coupons', i: 'fa-ticket', t: '团购核销' }, { r: '/aftersale', i: 'fa-rotate-left', t: '售后与返修' }, { r: '/pricelist', i: 'fa-file-invoice-dollar', t: '报价' }, { r: '/hr', i: 'fa-money-check-dollar', t: '人力与工资' }, { r: '/supply', i: 'fa-truck-field', t: '供应链采购' }, { r: '/compete', i: 'fa-scale-balanced', t: '竞品比价' }, { r: '/sop', i: 'fa-list-check', t: '门店 SOP' }] }
+  { grp: '运营', items: [{ r: '/platform', i: 'fa-chart-simple', t: '平台运营' }, { r: '/aftersale', i: 'fa-rotate-left', t: '售后与返修' }, { r: '/pricelist', i: 'fa-file-invoice-dollar', t: '报价' }, { r: '/hr', i: 'fa-money-check-dollar', t: '人力与工资' }, { r: '/supply', i: 'fa-truck-field', t: '供应链采购' }, { r: '/compete', i: 'fa-scale-balanced', t: '竞品比价' }, { r: '/sop', i: 'fa-list-check', t: '门店 SOP' }] }
 ];
 let route = '/index';
 let ui = { q: '', biz: '全部', range: '全部', devStatus: '全部', devType: '', devBrand: '', partCat: '', partSub: '', partWarn: false, devFilterOpen: false, partSubOpen: false, pawnFilterOpen: false, pawnWarn: false, pawnCat: '', pawnSub: '', pawnBrand: '', pawnMode: 'list', flowTab: 'all', seg: 0, chat: [], pend: null, quick: 'today', sortBy: 'date' };
@@ -1024,7 +1024,7 @@ function render() {
     '/repair': pRepair, '/schedule': pSchedule, '/flow': pFlow, '/customers': pCustomers2,
     '/engineer-stats': pEngineer, '/ai-chat': pChat, '/store-expense': pExpense2, '/stock-alert': pStockAlert,
     '/accounts': pAccounts, '/audit-logs': pLogs, '/settings': pSettings, '/search': pSearch,
-    '/cost': pCost, '/cash': pCash, '/slow': pSlow, '/platform': pPlatform, '/coupons': pCoupons, '/aftersale': pAftersale,
+    '/cost': pCost, '/cash': pCash, '/slow': pSlow, '/platform': pPlatform, '/aftersale': pAftersale,
     '/pricelist': pPricelist, '/hr': pHR, '/supply': pSupply, '/compete': pCompete, '/sop': pSOP,
     '/device-detail': pDeviceDetail, '/customer-detail': pCustomerDetail2, '/engineer-detail': pEngDetail
   };
@@ -2371,76 +2371,6 @@ function openPlatformForm() {
 }
 function delPlat(id) { if (!confirm('删除这一期平台数据？')) return; DB.platform = DB.platform.filter(x => x.id !== id); persist(); render(); toast('已删除'); }
 
-/* ---- 团购券与核销（美团/抖音券，实收口径） ---- */
-const couponList = () => (DB.coupons || []).slice();
-const redeemList = () => (DB.redemptions || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-const cpHits = (c) => redeemList().filter(r => r.coupon_id === c.id);
-function pCoupons() {
-  const ym = ymNow(), cs = couponList(), rs = redeemList();
-  const mRs = rs.filter(r => (r.date || '').slice(0, 7) === ym);
-  const mAmt = mRs.reduce((a, r) => a + num(r.real), 0);
-  const avg = mRs.length ? mAmt / mRs.length : 0;
-  const pl = platList()[0];
-  const deal = pl && (num(pl.dy && pl.dy.deal) || num(pl.mt && pl.mt.order)) || 0;
-  const vRate = deal ? (mRs.length / deal * 100) : 0;
-  return bhead('团购核销', '<button class="pill" data-form="coupon"><i class="fa-solid fa-plus"></i>加券种</button>') + `<div class="pad" style="padding-top:14px">
-  <div class="hint">核销即记一笔：券面价、实收（平台结算后到手），自动算实收率；核销率 = 本月核销单 ÷ 平台成交人数。</div>
-  <div class="card" style="margin-top:12px"><div class="kpis">
-    ${KPI('在售券种', cs.length + ' 种')}${KPI('本月核销', mRs.length + ' 单', C.primary, true)}${KPI('本月实收', money(mAmt), C.success)}
-  </div><div class="kpis" style="margin-top:8px">
-    ${KPI('单均实收', money(avg))}${KPI('本月核销率', deal ? vRate.toFixed(0) + '%' : '—', vRate && vRate < 50 ? C.warning : C.success)}
-  </div></div>
-  ${cs.length ? `<div class="sec-title" style="margin:18px 2px 10px">券种 · 按实收排序</div>` + cs.map(c => {
-    const h = cpHits(c), amt = h.reduce((a, r) => a + num(r.real), 0);
-    const rate = num(c.price) ? (num(c.real) || num(c.price)) / num(c.price) * 100 : 0;
-    return `<div class="item"><div class="lr"><div class="name">${esc(c.name)}</div><div class="money">${money(c.price)}</div></div>
-    <div class="sub">${esc(c.platform || '—')} · 实收率 ${rate ? rate.toFixed(0) + '%' : '—'}${c.note ? ' · ' + esc(c.note) : ''}</div>
-    <div class="sub">已核销 ${h.length} 单 · 实收 ${money(amt)}${h.length ? ' · 单均 ' + money(amt / h.length) : ''}</div>
-    <div class="btns" style="margin-top:10px"><button class="btn sm" data-act="redeem" data-id="${c.id}">核销一单</button>
-      <button class="btn sm line" data-act="editcoupon" data-id="${c.id}">修改</button>
-      <button class="btn sm line" data-act="delcoupon" data-id="${c.id}">删除</button></div></div>`;
-  }).join('') : empty('还没有券种，先把抖音/美团在卖的券录进来')}
-  ${rs.length ? `<div class="sec-title" style="margin:18px 2px 10px">最近核销</div>${rs.slice(0, 15).map(r => `<div class="item">
-    <div class="lr"><div class="name">${esc(r.coupon_name || '—')}</div><div class="money">${money(r.real)}</div></div>
-    <div class="sub">${esc(r.date)}${r.order_no ? ' · 工单 ' + esc(r.order_no) : ''}${r.qty && num(r.qty) > 1 ? ' · ' + num(r.qty) + ' 张' : ''}${r.note ? ' · ' + esc(r.note) : ''}</div>
-    <div class="btns" style="margin-top:8px"><button class="btn sm danger" data-act="delredeem" data-id="${r.id}">删除</button></div></div>`).join('')}` : ''}
-  <div style="height:20px"></div>
-</div>`;
-}
-function openCouponForm(id) {
-  const c = id ? couponList().find(x => x.id === id) : null;
-  openSheet(c ? '编辑券种' : '加券种',
-    fText('name', '券名 *', c && c.name, '如 苹果换电池券') +
-    fChips('platform', '平台', c && c.platform || '抖音', ['抖音', '美团', '点评', '线下']) +
-    two(fNum('price', '券面价（顾客付）', c && c.price, '0') + fNum('real', '实收（到手，可空）', c && c.real, '平台结算后金额')) +
-    fArea('note', '备注', c && c.note, '含配件 / 工时 / 有效期'),
-    () => {
-      const v = readVals();
-      if (!v.name) throw new Error('请填券名');
-      const rec = { id: c ? c.id : uid('cp'), name: v.name, platform: v.platform, price: num(v.price), real: num(v.real), note: v.note };
-      if (c) { Object.assign(c, rec); log('修改券种 ' + rec.name); }
-      else { DB.coupons.push(rec); log('新增券种 ' + rec.name); }
-      persist(); toast('已保存'); closeSheet(); go('/coupons');
-    });
-}
-function openRedeemForm(cid) {
-  const c = couponList().find(x => x.id === cid); if (!c) return;
-  openSheet('核销 · ' + c.name,
-    `<div class="hint" style="margin-bottom:10px">券面价 ${money(c.price)}${num(c.real) ? ' · 实收 ' + money(c.real) : ''}</div>` +
-    two(fDate('date', '核销日期', today()) + fNum('qty', '张数', 1, '1')) +
-    fNum('real', '实收（到手）', num(c.real) || num(c.price), '平台结算后金额') +
-    fText('order_no', '关联工单号（可空）', '', 'WX2611…') +
-    fArea('note', '备注', '', ''),
-    () => {
-      const v = readVals();
-      const qty = Math.max(1, Math.round(num(v.qty) || 1));
-      DB.redemptions.push({ id: uid('rd'), coupon_id: c.id, coupon_name: c.name, platform: c.platform, date: v.date || today(), qty, real: num(v.real), order_no: v.order_no, note: v.note });
-      log('核销 ' + c.name + ' ×' + qty + ' ' + money(num(v.real))); persist(); toast('已记核销'); closeSheet(); go('/coupons');
-    });
-}
-function delCoupon(id) { if (!confirm('删除这个券种？已核销记录会保留')) return; DB.coupons = couponList().filter(x => x.id !== id); persist(); render(); }
-function delRedeem(id) { if (!confirm('删除这条核销记录？')) return; DB.redemptions = redeemList().filter(x => x.id !== id); persist(); render(); }
-
 /* ---- 价目表 ---- */
 function pPricelist() {
   const l = (DB.priceList || []).slice();
@@ -2947,10 +2877,6 @@ document.addEventListener('click', e => {
     if (a === 'sendchat') { sendChat(); return; }
     if (a === 'delafter') { delAfter(id); return; }
     if (a === 'delplat') { delPlat(id); return; }
-    if (a === 'redeem') { openRedeemForm(id); return; }
-    if (a === 'editcoupon') { openCouponForm(id); return; }
-    if (a === 'delcoupon') { delCoupon(id); return; }
-    if (a === 'delredeem') { delRedeem(id); return; }
     if (a === 'editprice') { openPriceForm(id); return; }
     if (a === 'delprice') { delPrice(id); return; }
     if (a === 'editsupply') { openSupplyForm(id); return; }
@@ -2983,7 +2909,6 @@ document.addEventListener('click', e => {
     else if (t === 'cash') openCashForm();
     else if (t === 'aftersale') openAftersaleForm();
     else if (t === 'platform') openPlatformForm();
-    else if (t === 'coupon') openCouponForm();
     else if (t === 'price') openPriceForm();
     else if (t === 'supply') openSupplyForm();
     else if (t === 'compete') openCompeteForm();
