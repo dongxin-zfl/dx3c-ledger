@@ -620,7 +620,15 @@ const flowStats = ym => {
   const out = l.filter(f => f.type === '支出').reduce((a, f) => a + num(f.amount), 0);
   return { inc, out, net: inc - out, l };
 };
-const fixedTotal = () => { const c = (DB && DB.costModel) ? DB.costModel : {}; return num(c.rent) + num(c.utility) + num(c.labor) + num(c.yearly) / 12; };
+function costMode() { // 首月固定工资 vs 12 月起转提成制
+  const c = cm(); if (c.mode === 'first' || c.mode === 'commission') return c.mode;
+  return today() < (c.commStart || '2026-12-01') ? 'first' : 'commission';
+}
+function fixedTotal() {
+  const c = cm();
+  const labor = costMode() === 'commission' ? 0 : num(c.labor);
+  return num(c.rent) + num(c.utility) + labor + num(c.yearly) / 12;
+}
 const inStock = () => DB.devices.filter(d => d.status === '在库');
 const repairDev = () => DB.devices.filter(d => d.status === '待修' || d.status === '转维修' || d.repair_status === '是');
 const stockSum = () => {
@@ -665,7 +673,7 @@ const TABS = [
 const MENU = [
   { grp: '业务', items: [{ r: '/repair', i: 'fa-wrench', t: '待修' }, { r: '/schedule', i: 'fa-calendar-check', t: '日程' }, { r: '/flow', i: 'fa-arrows-left-right-to-line', t: '流水' }, { r: '/customers', i: 'fa-users', t: '客户' }, { r: '/engineer-stats', i: 'fa-users-gear', t: '工程师' }, { r: '/ai-chat', i: 'fa-comments', t: '问青龙' }] },
   { grp: '管理', items: [{ r: '/cost', i: 'fa-coins', t: '成本与保本' }, { r: '/cash', i: 'fa-water', t: '现金流预警' }, { r: '/stock-alert', i: 'fa-triangle-exclamation', t: '库存预警' }, { r: '/slow', i: 'fa-hourglass-half', t: '滞销设备' }, { r: '/store-expense', i: 'fa-store', t: '店铺开支' }, { r: '/accounts', i: 'fa-user-gear', t: '账号管理' }, { r: '/audit-logs', i: 'fa-scroll', t: '操作日志' }, { r: '/settings', i: 'fa-gear', t: '同步与备份' }] },
-  { grp: '运营', items: [{ r: '/platform', i: 'fa-chart-simple', t: '平台运营' }, { r: '/aftersale', i: 'fa-rotate-left', t: '售后与返修' }, { r: '/pricelist', i: 'fa-file-invoice-dollar', t: '报价' }, { r: '/hr', i: 'fa-money-check-dollar', t: '人力与工资' }, { r: '/supply', i: 'fa-truck-field', t: '供应链采购' }, { r: '/compete', i: 'fa-scale-balanced', t: '竞品比价' }, { r: '/sop', i: 'fa-list-check', t: '门店 SOP' }] }
+  { grp: '运营', items: [{ r: '/platform', i: 'fa-chart-simple', t: '平台运营' }, { r: '/coupons', i: 'fa-ticket', t: '团购核销' }, { r: '/aftersale', i: 'fa-rotate-left', t: '售后与返修' }, { r: '/pricelist', i: 'fa-file-invoice-dollar', t: '报价' }, { r: '/hr', i: 'fa-money-check-dollar', t: '人力与工资' }, { r: '/supply', i: 'fa-truck-field', t: '供应链采购' }, { r: '/compete', i: 'fa-scale-balanced', t: '竞品比价' }, { r: '/sop', i: 'fa-list-check', t: '门店 SOP' }] }
 ];
 let route = '/index';
 let ui = { q: '', biz: '全部', range: '全部', devStatus: '全部', devType: '', devBrand: '', partCat: '', partSub: '', partWarn: false, devFilterOpen: false, partSubOpen: false, pawnFilterOpen: false, pawnWarn: false, pawnCat: '', pawnSub: '', pawnBrand: '', pawnMode: 'list', flowTab: 'all', seg: 0, chat: [], pend: null, quick: 'today', sortBy: 'date' };
@@ -1016,7 +1024,7 @@ function render() {
     '/repair': pRepair, '/schedule': pSchedule, '/flow': pFlow, '/customers': pCustomers2,
     '/engineer-stats': pEngineer, '/ai-chat': pChat, '/store-expense': pExpense2, '/stock-alert': pStockAlert,
     '/accounts': pAccounts, '/audit-logs': pLogs, '/settings': pSettings, '/search': pSearch,
-    '/cost': pCost, '/cash': pCash, '/slow': pSlow, '/platform': pPlatform, '/aftersale': pAftersale,
+    '/cost': pCost, '/cash': pCash, '/slow': pSlow, '/platform': pPlatform, '/coupons': pCoupons, '/aftersale': pAftersale,
     '/pricelist': pPricelist, '/hr': pHR, '/supply': pSupply, '/compete': pCompete, '/sop': pSOP,
     '/device-detail': pDeviceDetail, '/customer-detail': pCustomerDetail2, '/engineer-detail': pEngDetail
   };
@@ -2100,12 +2108,22 @@ function openAccountForm() {
 
 /* ================= 新增：成本口径 / 现金流 / 售后 / 平台 / 价目 / 供应链 / 人力 / SOP / 比价 ================= */
 function cm() {
-  const d = { rent: 5600, utility: 300, labor: 3000, yearly: 17400, margin: 0.522, mtRate: 0.05, dyRate: 0.115, mtShare: 0.58, dyShare: 0.42, cashStart: 0, cashStartDate: '' };
+  const d = { rent: 5600, utility: 300, labor: 3000, yearly: 17400, margin: 0.4445, commission: 0.40, commStart: '2026-12-01', mode: 'auto', mtRate: 0.05, dyRate: 0.115, mtShare: 0.58, dyShare: 0.42, cashStart: 0, cashStartDate: '' };
   DB.costModel = Object.assign({}, d, DB.costModel || {});
   if (!DB.costModel.cashStartDate) DB.costModel.cashStartDate = ymNow() + '-01';
   return DB.costModel;
 }
-function breakEven() { const c = cm(); return num(c.margin) > 0 ? fixedTotal() / num(c.margin) : 0; }
+function breakEven() {
+  const c = cm();
+  const keep = costMode() === 'commission' ? num(c.margin) * (1 - num(c.commission)) : num(c.margin);
+  return keep > 0 ? fixedTotal() / keep : 0;
+}
+function breakEvenOf(mode) {
+  const c = cm();
+  const fixed = mode === 'commission' ? num(c.rent) + num(c.utility) + num(c.yearly) / 12 : num(c.rent) + num(c.utility) + num(c.labor) + num(c.yearly) / 12;
+  const keep = mode === 'commission' ? num(c.margin) * (1 - num(c.commission)) : num(c.margin);
+  return keep > 0 ? fixed / keep : 0;
+}
 function blendedComm() { const c = cm(); return num(c.mtRate) * num(c.mtShare) + num(c.dyRate) * num(c.dyShare); }
 const settleOf = income => num(income) * (1 - blendedComm());
 const settleProfitOf = o => settleOf(o.income) - oCost(o);
@@ -2181,7 +2199,9 @@ function openCashForm() {
 /* ---- 售后与返修 ---- */
 function pAftersale() {
   const ym = ymNow(), l = (DB.aftersales || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const mRe = l.filter(x => (x.date || '').slice(0, 7) === ym);
+  const allM = l.filter(x => (x.date || '').slice(0, 7) === ym);
+  const mRe = allM.filter(x => (x.cat || '返修') === '返修');           // 返修率只算真返修
+  const mPlat = allM.filter(x => (x.cat || '返修') === '平台售后');
   const mRepair = DB.orders.filter(o => o.biz_type === '维修' && (o.order_date || '').slice(0, 7) === ym).length;
   const rate = mRepair ? (mRe.length / mRepair * 100) : 0;
   const pay = mRe.reduce((a, x) => a + num(x.compensation), 0);
@@ -2189,13 +2209,13 @@ function pAftersale() {
   <div class="card ${rate > 3 ? 'lowcard' : ''}"><div class="lr"><div class="sec-title" style="margin:0"><i class="fa-solid fa-rotate-left" style="color:var(--warning)"></i>本月返修率</div>
     ${badge(rate > 3 ? '超标 · 需整改' : '正常', rate > 3 ? C.danger : C.success, rate > 3 ? C.dangerBg : C.successBg)}</div>
     <div style="font-size:32px;font-weight:900;color:${rate > 3 ? C.danger : C.success};margin:6px 0">${rate.toFixed(1)}%</div>
-    <div class="hint">本月返修 ${mRe.length} 笔 ÷ 本月维修单 ${mRepair} 单，红线 3%</div>
+    <div class="hint">本月真返修 ${mRe.length} 笔 ÷ 本月维修单 ${mRepair} 单，红线 3%（平台退款 / 取消预约不计入）</div>
     <div class="divider"></div>
-    <div class="kpis">${KPI('本月赔付', money(pay), C.danger)}${KPI('累计返修', l.length + ' 笔')}</div>
+    <div class="kpis">${KPI('本月赔付', money(pay), C.danger)}${KPI('本月平台售后', mPlat.length + ' 笔', C.info)}</div>
     ${rate > 3 ? `<div class="warnbox" style="margin-top:12px">超红线：先按原因归类（配件质量 / 工艺 / 误判），把赔付金额最高的 3 单回访，2 周内看返修率是否降到 3% 以下。</div>` : ''}
   </div>
-  ${l.length ? `<div class="sec-title" style="margin:18px 2px 10px">返修记录</div>${l.map(x => `<div class="item">
-    <div class="lr"><div class="name">${esc(x.model || '—')}</div>${badge(x.reason || '未填原因', C.warning, C.warningBg)}</div>
+  ${l.length ? `<div class="sec-title" style="margin:18px 2px 10px">售后记录</div>${l.map(x => `<div class="item">
+    <div class="lr"><div class="name">${esc(x.model || '—')}</div>${badge((x.cat || '返修'), (x.cat || '返修') === '返修' ? C.warning : C.info, (x.cat || '返修') === '返修' ? C.warningBg : '#E0F2FE')}${badge(x.reason || '未填原因', C.subText, '#F1F5F9')}</div>
     <div class="sub">${esc(x.date)} · 原单 ${esc(x.order_no || '—')} · 客户 ${esc(x.customer || '—')}</div>
     <div class="sub">原维修：${esc(x.item || '—')}${num(x.compensation) ? ' · 赔付 ' + money(x.compensation) : ''}</div>
     <div class="btns" style="margin-top:10px"><button class="btn sm danger" data-act="delafter" data-id="${x.id}">删除</button></div></div>`).join('')}` : empty('还没有返修记录，这本身是好事')}
@@ -2206,6 +2226,7 @@ function openAftersaleForm() {
   openSheet('记一笔返修',
     `<div class="field"><label>原工单号</label><select data-k="order_no"><option value="">不关联</option>${opts.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></div>` +
     two(fDate('date', '返修日期', today()) + fText('customer', '客户（尾号/称呼）', '', '尾号 3721')) +
+    fChips('cat', '类型', '返修', ['返修', '平台售后', '赔付', '差评']) +
     fText('model', '机型', '', '如 iPhone 13') +
     fText('item', '原维修项目', '', '如 换外屏') +
     fChips('reason', '返修原因', '配件质量', ['配件质量', '工艺问题', '误判', '客户使用', '其他']) +
@@ -2216,7 +2237,7 @@ function openAftersaleForm() {
       let model = v.model, item = v.item, customer = v.customer;
       const o = v.order_no ? DB.orders.find(x => x.order_no === v.order_no) : null;
       if (o) { model = model || o.model; item = item || o.fault_desc; customer = customer || o.customer; }
-      DB.aftersales.unshift({ id: uid('as'), date: v.date, order_no: v.order_no, customer, model, item, reason: v.reason, compensation: num(v.compensation) });
+      DB.aftersales.unshift({ id: uid('as'), date: v.date, order_no: v.order_no, customer, model, item, reason: v.reason, cat: v.cat || '返修', compensation: num(v.compensation) });
       log('记返修 ' + (model || '') + ' ' + (v.reason || '')); persist(); toast('已记录'); closeSheet(); go('/aftersale');
     });
 }
@@ -2236,8 +2257,16 @@ function pPlatform() {
       <div class="hint" style="margin-top:3px">环比 ${esc(q ? delta(a, q[b]) : '—')}${w ? ' · 占上一环节 ' + (num(w) ? (num(a) / num(w) * 100).toFixed(0) + '%' : '—') : ''}</div></div>`;
   };
   const mt = p.mt || {}, dy = p.dy || {};
+  const warn = [];
+  if (num(mt.expo) && num(mt.lead) / num(mt.expo) < 0.03) warn.push('美团留资率 ' + ((num(mt.lead) / num(mt.expo)) * 100).toFixed(1) + '% < 3%（曝光来了但没留下电话）');
+  if (num(mt.respSec) && num(mt.respSec) > 30) warn.push('美团响应 ' + num(mt.respSec) + ' 秒 > 30 秒');
+  if (num(mt.order) && num(mt.verify) / num(mt.order) < 0.5) warn.push('美团核销率 ' + ((num(mt.verify) / num(mt.order)) * 100).toFixed(0) + '% < 50%');
+  if (num(dy.deal) && num(dy.verifyCoupon) / num(dy.deal) < 0.5) warn.push('抖音核销率 ' + ((num(dy.verifyCoupon) / num(dy.deal)) * 100).toFixed(0) + '% < 50%（多在下单后失联）');
+  if (q && num(q.mt && q.mt.expo) && num(mt.expo) < num(q.mt.expo) * 0.9) warn.push('美团曝光环比掉 ' + (((num(mt.expo) / num(q.mt.expo)) - 1) * 100).toFixed(0) + '%（掉量要看商品/评分）');
+  if (num(dy.refundCoupon)) warn.push('抖音退款券 ' + num(dy.refundCoupon) + ' 张，按售后原因归类');
   return bhead('平台运营', '<button class="pill" data-form="platform"><i class="fa-solid fa-plus"></i>录数据</button>') + `<div class="pad" style="padding-top:14px">
   <div class="hint">统计周期 ${esc(p.start || '—')} ~ ${esc(p.end || '—')}${l.length > 1 ? '（对比上一期 ' + esc(q.end || '') + '）' : ''}</div>
+  ${warn.length ? `<div class="warnbox" style="margin-top:12px"><b>需要动的地方（${warn.length}）</b><br>${warn.map(w => '· ' + esc(w)).join('<br>')}</div>` : `<div class="hint" style="margin-top:12px;color:${C.success}">本周五项指标都在线上，不用加动作。</div>`}
   <div class="card" style="margin-top:12px"><div class="sec-title" style="margin-bottom:4px"><i class="fa-solid fa-store" style="color:#F59E0B"></i>美团 · 点评 五段漏斗</div>
     ${seg('曝光人数', mt.expo, 'expo', mt.expo, '#F59E0B')}
     ${seg('访问人数（点击）', mt.visit, 'visit', mt.expo, '#F97316')}
@@ -2245,6 +2274,7 @@ function pPlatform() {
     ${seg('核销人次（到店成交）', mt.verify, 'verify', mt.order, '#16A34A')}
     <div class="divider"></div>
     <div class="kpis">${KPI('留资', fmt(mt.lead))}${KPI('核销金额', money(mt.verifyAmt))}${KPI('新增评价', fmt(mt.review))}${KPI('差评', fmt(mt.badReview), num(mt.badReview) ? C.danger : C.success)}</div>
+    <div class="kpis" style="margin-top:8px">${KPI('在线咨询', fmt(mt.consult))}${KPI('平均响应', num(mt.respSec) ? num(mt.respSec) + ' 秒' : '—')}${KPI('经营评分', fmt(mt.score))}</div>
     <div class="lr" style="margin-top:10px"><span class="sub">降幅最大：${(() => { const a = num(mt.visit) / (num(mt.expo) || 1), b = num(mt.order) / (num(mt.visit) || 1), c2 = num(mt.verify) / (num(mt.order) || 1); return a <= b && a <= c2 ? '曝光→点击' : b <= c2 ? '点击→下单' : '下单→到店'; })()}</span>
       <span class="sub">点评 ${esc(mt.starDz || '—')} · 美团 ${esc(mt.starMt || '—')}</span></div>
   </div>
@@ -2254,6 +2284,7 @@ function pPlatform() {
     ${seg('核销券数', dy.verifyCoupon, 'verifyCoupon', dy.deal, '#16A34A')}
     <div class="divider"></div>
     <div class="kpis">${KPI('成交转化率', (num(dy.visitP) ? (num(dy.deal) / num(dy.visitP) * 100).toFixed(2) : '—') + '%')}${KPI('核销金额', money(dy.verifyAmt))}${KPI('直播成交', money(dy.liveAmt))}${KPI('短视频成交', money(dy.videoAmt))}</div>
+    <div class="kpis" style="margin-top:8px">${KPI('核销率', num(dy.deal) ? (num(dy.verifyCoupon) / num(dy.deal) * 100).toFixed(0) + '%' : '—')}${KPI('退款券', fmt(dy.refundCoupon), num(dy.refundCoupon) ? C.danger : C.success)}</div>
   </div>
   <div class="card" style="margin-top:14px"><div class="sec-title" style="margin-bottom:8px">历史期数</div>
     ${l.slice(0, 6).map(x => `<div class="lr" style="padding:8px 0;border-bottom:1px solid var(--soft)"><span class="sub">${esc(x.start)} ~ ${esc(x.end)}</span>
@@ -2264,27 +2295,151 @@ function pPlatform() {
 }
 function openPlatformForm() {
   openSheet('录平台数据（周）',
+    `<div class="field"><label>从后台粘贴（可选：一行一个「指标 数值」，自动识别填好）</label>
+      <textarea id="ai-paste" placeholder="曝光人数 525
+访问人数 75
+下单人数 18
+留资人数 2
+在线咨询人数 5
+平均响应时长 18.1秒" style="height:96px"></textarea></div>
+    <button type="button" class="btn line block" id="ai-parse" style="margin:-4px 0 12px">识别并填入下面的字段</button>` +
     two(fDate('start', '周期起', '') + fDate('end', '周期止', today())) +
+    fChips('srcPlat', '这次录的是哪个平台', '美团', ['美团', '抖音']) +
     `<div class="sec-title" style="margin:14px 0 8px;font-size:13px">美团 / 大众点评</div>` +
     two(fNum('expo', '曝光人数', '', '0') + fNum('visit', '访问人数', '', '0')) +
     two(fNum('order', '下单人数', '', '0') + fNum('lead', '留资人数', '', '0')) +
     two(fNum('verify', '核销人次', '', '0') + fNum('verifyAmt', '核销金额', '', '0')) +
     two(fNum('review', '新增评价', '', '0') + fNum('badReview', '新增差评', '', '0')) +
     two(fText('starDz', '点评星级', '', '4.5星') + fText('starMt', '美团星级', '', '4.6星')) +
+    two(fNum('consult', '在线咨询人数', '', '0') + fNum('respSec', '平均响应（秒）', '', '0')) +
+    fNum('score', '经营评分', '', '0') +
     `<div class="sec-title" style="margin:14px 0 8px;font-size:13px">抖音</div>` +
     two(fNum('visitP', '门店访问人数', '', '0') + fNum('deal', '成交人数', '', '0')) +
     two(fNum('verifyCoupon', '核销券数', '', '0') + fNum('verifyAmtDy', '核销金额', '', '0')) +
-    two(fNum('liveAmt', '直播成交额', '', '0') + fNum('videoAmt', '短视频成交额', '', '0')),
+    two(fNum('liveAmt', '直播成交额', '', '0') + fNum('videoAmt', '短视频成交额', '', '0')) +
+    fNum('refundCoupon', '退款券数（平台售后）', '', '0'),
     () => {
       const v = readVals();
       if (!v.end) throw new Error('请填周期止');
       const rec = { id: uid('pl'), start: v.start, end: v.end,
-        mt: { expo: num(v.expo), visit: num(v.visit), order: num(v.order), lead: num(v.lead), verify: num(v.verify), verifyAmt: num(v.verifyAmt), review: num(v.review), badReview: num(v.badReview), starDz: v.starDz, starMt: v.starMt },
-        dy: { visitP: num(v.visitP), deal: num(v.deal), verifyCoupon: num(v.verifyCoupon), verifyAmt: num(v.verifyAmtDy), liveAmt: num(v.liveAmt), videoAmt: num(v.videoAmt) } };
+        mt: { expo: num(v.expo), visit: num(v.visit), order: num(v.order), lead: num(v.lead), verify: num(v.verify), verifyAmt: num(v.verifyAmt), review: num(v.review), badReview: num(v.badReview), starDz: v.starDz, starMt: v.starMt, consult: num(v.consult), respSec: num(v.respSec), score: num(v.score) },
+        dy: { visitP: num(v.visitP), deal: num(v.deal), verifyCoupon: num(v.verifyCoupon), verifyAmt: num(v.verifyAmtDy), liveAmt: num(v.liveAmt), videoAmt: num(v.videoAmt), refundCoupon: num(v.refundCoupon) } };
       DB.platform.push(rec); log('录入平台数据 ' + v.end); persist(); toast('已保存'); closeSheet(); go('/platform');
     });
+  (() => {
+    const btn = $('#ai-parse'); if (!btn) return;
+    const starMT = [
+      [/曝光人数|曝光量|^曝光/, 'expo'], [/门店页访问人数|门店访问人数/, 'visitP'],
+      [/访问人数|访问量/, 'visit'], [/下单人数|下单量/, 'order'], [/留资/, 'lead'],
+      [/核销人次/, 'verify'], [/核销券数|核销券/, 'verifyCoupon'], [/核销金额/, 'verifyAmt'],
+      [/新增评价|评价数/, 'review'], [/差评/, 'badReview'], [/在线咨询/, 'consult'],
+      [/响应/, 'respSec'], [/经营评分|门店评分/, 'score'], [/成交人数/, 'deal'],
+      [/退款券/, 'refundCoupon'], [/直播/, 'liveAmt'], [/短视频/, 'videoAmt'], [/星级/, 'starDz']
+    ];
+    const pickPlat = () => { const box = $('[data-chips="srcPlat"]'); const on = box ? $('.chip.on', box) : null; return on ? on.dataset.v : '美团'; };
+    btn.onclick = () => {
+      const txt = ($('#ai-paste') || {}).value || '';
+      const plat = pickPlat();
+      let hit = 0;
+      txt.split(/\n+/).forEach(line => {
+        const t = line.trim(); if (!t) return;
+        if (/招牌|主打|备注|说明/.test(t)) return;
+        const m = starMT.find(x => x[0].test(t)); if (!m) return;
+        let key = m[1];
+        const n = t.match(/[\d,]+(?:\.\d+)?/);
+        if (!n || !/\d/.test(n[0])) return;
+        if (plat === '抖音') {           // 抖音后台口径映射
+          if (key === 'visit') key = 'visitP';
+          if (key === 'order') key = 'deal';
+          if (key === 'verifyAmt') key = 'verifyAmtDy';
+          if (key === 'lead') return;
+        } else {                          // 美团口径
+          if (key === 'visitP') key = 'visit';
+          if (key === 'deal') key = 'order';
+          if (key === 'verifyCoupon') key = 'verify';
+          if (key === 'verifyAmtDy') key = 'verifyAmt';
+          if (key === 'refundCoupon') return;
+        }
+        const el = $('[data-k="' + key + '"]'); if (!el) return;
+        if (key === 'starDz') { const s2 = t.match(/\d+(?:\.\d+)?\s*星/); el.value = s2 ? s2[0] : n[0]; }
+        else el.value = String(n[0]).replace(/,/g, '');
+        hit++;
+      });
+      toast(hit ? '已识别 ' + hit + ' 项（' + plat + '口径），核对后保存' : '没识别到「指标 数值」，检查粘贴格式');
+    };
+  })();
 }
 function delPlat(id) { if (!confirm('删除这一期平台数据？')) return; DB.platform = DB.platform.filter(x => x.id !== id); persist(); render(); toast('已删除'); }
+
+/* ---- 团购券与核销（美团/抖音券，实收口径） ---- */
+const couponList = () => (DB.coupons || []).slice();
+const redeemList = () => (DB.redemptions || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+const cpHits = (c) => redeemList().filter(r => r.coupon_id === c.id);
+function pCoupons() {
+  const ym = ymNow(), cs = couponList(), rs = redeemList();
+  const mRs = rs.filter(r => (r.date || '').slice(0, 7) === ym);
+  const mAmt = mRs.reduce((a, r) => a + num(r.real), 0);
+  const avg = mRs.length ? mAmt / mRs.length : 0;
+  const pl = platList()[0];
+  const deal = pl && (num(pl.dy && pl.dy.deal) || num(pl.mt && pl.mt.order)) || 0;
+  const vRate = deal ? (mRs.length / deal * 100) : 0;
+  return bhead('团购核销', '<button class="pill" data-form="coupon"><i class="fa-solid fa-plus"></i>加券种</button>') + `<div class="pad" style="padding-top:14px">
+  <div class="hint">核销即记一笔：券面价、实收（平台结算后到手），自动算实收率；核销率 = 本月核销单 ÷ 平台成交人数。</div>
+  <div class="card" style="margin-top:12px"><div class="kpis">
+    ${KPI('在售券种', cs.length + ' 种')}${KPI('本月核销', mRs.length + ' 单', C.primary, true)}${KPI('本月实收', money(mAmt), C.success)}
+  </div><div class="kpis" style="margin-top:8px">
+    ${KPI('单均实收', money(avg))}${KPI('本月核销率', deal ? vRate.toFixed(0) + '%' : '—', vRate && vRate < 50 ? C.warning : C.success)}
+  </div></div>
+  ${cs.length ? `<div class="sec-title" style="margin:18px 2px 10px">券种 · 按实收排序</div>` + cs.map(c => {
+    const h = cpHits(c), amt = h.reduce((a, r) => a + num(r.real), 0);
+    const rate = num(c.price) ? (num(c.real) || num(c.price)) / num(c.price) * 100 : 0;
+    return `<div class="item"><div class="lr"><div class="name">${esc(c.name)}</div><div class="money">${money(c.price)}</div></div>
+    <div class="sub">${esc(c.platform || '—')} · 实收率 ${rate ? rate.toFixed(0) + '%' : '—'}${c.note ? ' · ' + esc(c.note) : ''}</div>
+    <div class="sub">已核销 ${h.length} 单 · 实收 ${money(amt)}${h.length ? ' · 单均 ' + money(amt / h.length) : ''}</div>
+    <div class="btns" style="margin-top:10px"><button class="btn sm" data-act="redeem" data-id="${c.id}">核销一单</button>
+      <button class="btn sm line" data-act="editcoupon" data-id="${c.id}">修改</button>
+      <button class="btn sm line" data-act="delcoupon" data-id="${c.id}">删除</button></div></div>`;
+  }).join('') : empty('还没有券种，先把抖音/美团在卖的券录进来')}
+  ${rs.length ? `<div class="sec-title" style="margin:18px 2px 10px">最近核销</div>${rs.slice(0, 15).map(r => `<div class="item">
+    <div class="lr"><div class="name">${esc(r.coupon_name || '—')}</div><div class="money">${money(r.real)}</div></div>
+    <div class="sub">${esc(r.date)}${r.order_no ? ' · 工单 ' + esc(r.order_no) : ''}${r.qty && num(r.qty) > 1 ? ' · ' + num(r.qty) + ' 张' : ''}${r.note ? ' · ' + esc(r.note) : ''}</div>
+    <div class="btns" style="margin-top:8px"><button class="btn sm danger" data-act="delredeem" data-id="${r.id}">删除</button></div></div>`).join('')}` : ''}
+  <div style="height:20px"></div>
+</div>`;
+}
+function openCouponForm(id) {
+  const c = id ? couponList().find(x => x.id === id) : null;
+  openSheet(c ? '编辑券种' : '加券种',
+    fText('name', '券名 *', c && c.name, '如 苹果换电池券') +
+    fChips('platform', '平台', c && c.platform || '抖音', ['抖音', '美团', '点评', '线下']) +
+    two(fNum('price', '券面价（顾客付）', c && c.price, '0') + fNum('real', '实收（到手，可空）', c && c.real, '平台结算后金额')) +
+    fArea('note', '备注', c && c.note, '含配件 / 工时 / 有效期'),
+    () => {
+      const v = readVals();
+      if (!v.name) throw new Error('请填券名');
+      const rec = { id: c ? c.id : uid('cp'), name: v.name, platform: v.platform, price: num(v.price), real: num(v.real), note: v.note };
+      if (c) { Object.assign(c, rec); log('修改券种 ' + rec.name); }
+      else { DB.coupons.push(rec); log('新增券种 ' + rec.name); }
+      persist(); toast('已保存'); closeSheet(); go('/coupons');
+    });
+}
+function openRedeemForm(cid) {
+  const c = couponList().find(x => x.id === cid); if (!c) return;
+  openSheet('核销 · ' + c.name,
+    `<div class="hint" style="margin-bottom:10px">券面价 ${money(c.price)}${num(c.real) ? ' · 实收 ' + money(c.real) : ''}</div>` +
+    two(fDate('date', '核销日期', today()) + fNum('qty', '张数', 1, '1')) +
+    fNum('real', '实收（到手）', num(c.real) || num(c.price), '平台结算后金额') +
+    fText('order_no', '关联工单号（可空）', '', 'WX2611…') +
+    fArea('note', '备注', '', ''),
+    () => {
+      const v = readVals();
+      const qty = Math.max(1, Math.round(num(v.qty) || 1));
+      DB.redemptions.push({ id: uid('rd'), coupon_id: c.id, coupon_name: c.name, platform: c.platform, date: v.date || today(), qty, real: num(v.real), order_no: v.order_no, note: v.note });
+      log('核销 ' + c.name + ' ×' + qty + ' ' + money(num(v.real))); persist(); toast('已记核销'); closeSheet(); go('/coupons');
+    });
+}
+function delCoupon(id) { if (!confirm('删除这个券种？已核销记录会保留')) return; DB.coupons = couponList().filter(x => x.id !== id); persist(); render(); }
+function delRedeem(id) { if (!confirm('删除这条核销记录？')) return; DB.redemptions = redeemList().filter(x => x.id !== id); persist(); render(); }
 
 /* ---- 价目表 ---- */
 function pPricelist() {
@@ -2467,10 +2622,15 @@ function pCost() {
     <div class="lr" style="margin-top:10px"><b>固定成本合计</b><b style="color:var(--primary);font-size:18px">${money(fixedTotal())}</b></div>
     <div class="hint" style="margin-top:6px">平台年费：美团 6,000 + 三地图约 3,000 + 世纪威锋 8,400 = ${money(c.yearly)}/年，摊月 ${money(num(c.yearly) / 12)}</div>
   </div>
-  <div class="card" style="margin-top:14px"><div class="sec-title" style="margin-bottom:10px"><i class="fa-solid fa-bullseye" style="color:var(--primary)"></i>保本线</div>
-    <div class="lr"><span class="sub">综合毛利率</span><b>${(num(c.margin) * 100).toFixed(1)}%</b></div>
+  <div class="card" style="margin-top:14px"><div class="sec-title" style="margin-bottom:10px"><i class="fa-solid fa-bullseye" style="color:var(--primary)"></i>保本线（结算价口径）</div>
+    <div class="lr"><span class="sub">当前口径</span><b>${costMode() === 'commission' ? '提成制（' + (num(c.commission) * 100).toFixed(0) + '% 提成，人工转变动）' : '首月（固定工资 ' + money(c.labor) + '）'}</b></div>
+    <div class="lr"><span class="sub">综合毛利率（扣平台佣金）</span><b>${(num(c.margin) * 100).toFixed(1)}%</b></div>
     <div style="font-size:30px;font-weight:900;color:var(--primary);margin:10px 0 2px">${money(be)} / 月</div>
-    <div class="hint">保本营业额 = 固定成本 ${money(fixedTotal())} ÷ 毛利率 ${(num(c.margin) * 100).toFixed(1)}%</div>
+    <div class="hint">保本营业额 = 固定成本 ${money(fixedTotal())} ÷ ${costMode() === 'commission' ? '门店留存率 ' + ((num(c.margin) * (1 - num(c.commission)) * 100).toFixed(1) + '%（毛利率×（1−提成））') : '毛利率 ' + (num(c.margin) * 100).toFixed(1) + '%'}</div>
+    <div class="divider"></div>
+    <div class="lr"><span class="sub">对照·首月固定工资口径</span><b>${money(breakEvenOf('first'))}</b></div>
+    <div class="lr" style="margin-top:6px"><span class="sub">对照·提成制（${(num(c.commission) * 100).toFixed(0)}%）口径</span><b>${money(breakEvenOf('commission'))}</b></div>
+    <div class="hint" style="margin-top:6px">12 月 1 日起自动切提成制，按「${esc(c.commStart || '2026-12-01')}」判断；实际切换日可在「改口径」里改。</div>
     <div class="divider"></div>
     <div class="lr"><span class="sub">本月已收款</span><b>${money(st.income)}</b></div>
     <div class="lr" style="margin-top:6px"><span class="sub">距保本差额</span><b style="color:${gap > 0 ? C.warning : C.success};font-size:16px">${money(gap)}</b></div>
@@ -2489,13 +2649,15 @@ function openCostForm() {
   openSheet('成本与保本口径',
     two(fNum('rent', '月租金（含物业）', c.rent, '0') + fNum('utility', '月水电杂费', c.utility, '0')) +
     two(fNum('labor', '月人工', c.labor, '0') + fNum('yearly', '平台年费（年额）', c.yearly, '0')) +
-    two(fNum('margin', '综合毛利率（0.522=52.2%）', c.margin, '0.3') + fNum('mtRate', '美团佣金率', c.mtRate, '0.05')) +
+    two(fNum('margin', '综合毛利率（结算价口径 0.4445=44.45%）', c.margin, '0.4445') + fNum('commission', '提成比例（0.4=40%）', c.commission, '0.4')) +
+    two(fText('commStart', '提成制生效日', c.commStart || '2026-12-01', '2026-12-01') + fNum('mtRate', '美团佣金率', c.mtRate, '0.05')) +
     two(fNum('dyRate', '抖音佣金率', c.dyRate, '0.115') + fNum('mtShare', '美团流水占比', c.mtShare, '0.58')) +
     fNum('dyShare', '抖音流水占比', c.dyShare, '0.42') +
-    `<div class="hint">毛利率先用 52.2%（底表口径），满月后换成流水实际值；止损由你定，建议连续 3 个月低于保本线触发调整。</div>`,
+    `<div class="hint">毛利率用结算价口径 44.45%（客单 230、配件 110、加权佣金 7.72%）；12 月起人工从固定转提成，保本线会自动切换。止损由你定，建议连续 3 个月低于保本线触发调整。</div>`,
     () => {
       const v = readVals();
-      ['rent', 'utility', 'labor', 'yearly', 'margin', 'mtRate', 'dyRate', 'mtShare', 'dyShare'].forEach(k => c[k] = num(v[k]));
+      ['rent', 'utility', 'labor', 'yearly', 'margin', 'commission', 'mtRate', 'dyRate', 'mtShare', 'dyShare'].forEach(k => c[k] = num(v[k]));
+      if (v.commStart) c.commStart = v.commStart;
       c.cashStart = num(c.cashStart);
       log('修改成本口径 毛利率 ' + (c.margin * 100).toFixed(1) + '%'); persist(); toast('已更新口径'); closeSheet(); go('/cost');
     });
@@ -2785,6 +2947,10 @@ document.addEventListener('click', e => {
     if (a === 'sendchat') { sendChat(); return; }
     if (a === 'delafter') { delAfter(id); return; }
     if (a === 'delplat') { delPlat(id); return; }
+    if (a === 'redeem') { openRedeemForm(id); return; }
+    if (a === 'editcoupon') { openCouponForm(id); return; }
+    if (a === 'delcoupon') { delCoupon(id); return; }
+    if (a === 'delredeem') { delRedeem(id); return; }
     if (a === 'editprice') { openPriceForm(id); return; }
     if (a === 'delprice') { delPrice(id); return; }
     if (a === 'editsupply') { openSupplyForm(id); return; }
@@ -2817,6 +2983,7 @@ document.addEventListener('click', e => {
     else if (t === 'cash') openCashForm();
     else if (t === 'aftersale') openAftersaleForm();
     else if (t === 'platform') openPlatformForm();
+    else if (t === 'coupon') openCouponForm();
     else if (t === 'price') openPriceForm();
     else if (t === 'supply') openSupplyForm();
     else if (t === 'compete') openCompeteForm();
