@@ -474,6 +474,12 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&a
 const num = v => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
 const fmt = n => (Number(n) || 0).toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const money = n => '¥' + fmt(n);
+const estNum = v => { // "500-600" / "600左右" / 600 → 取一个可算的数
+  if (v == null || v === '') return 0;
+  const ns = String(v).match(/\d+(?:\.\d+)?/g); if (!ns) return 0;
+  const a = Number(ns[0]), b = ns.length > 1 ? Number(ns[1]) : a;
+  return Math.round((a + b) / 2);
+};
 const signed = n => (Number(n) || 0) >= 0 ? '¥' + fmt(n) : '-¥' + fmt(Math.abs(n));
 const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 const ymNow = () => today().slice(0, 7);
@@ -483,7 +489,7 @@ const dateLabel = d => { if (!d) return '未标注日期'; const x = daysFrom(d)
 
 /* 原 App 常量（照抄源码） */
 const C = { primary: '#2563EB', primaryLight: '#EFF6FF', bg: '#F5F7FA', card: '#fff', text: '#0F172A', subText: '#64748B', faint: '#94A3B8', border: '#E2E8F0', success: '#16A34A', successBg: '#F0FDF4', warning: '#D97706', warningBg: '#FFFBEB', danger: '#DC2626', dangerBg: '#FEF2F2', info: '#0891B2', purple: '#7C3AED' };
-const DEVICE_TYPES = ['手机', '平板', '电脑'];
+const DEVICE_TYPES = ['手机', '平板', '电脑', '电脑配件', '配件', '其他'];
 const DEVICE_BRANDS = ['苹果', '华为', '荣耀', '小米', '红米', 'OPPO', 'vivo', '一加', '三星', '联想', '戴尔', '惠普', '其他'];
 const DEVICE_GRADES = ['全新', '99新', '95新', '9成新', '85新', '8成新', '7成新', '6成新及以下'];
 const DEVICE_STATUS = ['全部', '在库', '待修', '已售出', '转维修', '报废'];
@@ -1498,10 +1504,12 @@ ${list.map(o => {
         ${src ? badge(src, C.purple, '#F5F3FF') : ''}
         ${o.engineer_name ? badge(o.engineer_name, C.subText, '#F3F4F6') : ''}
         ${badge(o.pay_status, pm.c, pm.bg)}
+        ${o.repair_status && o.repair_status !== '已修好' ? badge(o.repair_status, C.warning, C.warningBg) : ''}
         ${(isOwner() || (SESSION && o.engineer_name === SESSION.name)) ? `<button class="delbtn" data-act="delorder" data-id="${o.id}"><i class="fa-solid fa-trash"></i></button>` : ''}
       </div>
       <div class="sub" style="margin-top:6px">${esc(o.order_date || '')}${daysFrom(o.order_date) === 0 ? ' 今天' : daysFrom(o.order_date) === 1 ? ' 昨天' : ''} · ${esc(o.order_no)}</div>
       <div style="font-size:13px;margin-top:8px;line-height:1.5">${o.model ? `【${esc(o.model)}】` : ''}${esc(o.fault_desc || '—')}</div>
+      ${num(o.deposit_amount) ? `<div class="sub">定金 ${money(o.deposit_amount)} · 待收 ${money((estNum(o.estimate_amount) || num(o.income)) - num(o.deposit_amount))}</div>` : ''}
       ${parts.length ? `<div class="parttags">${parts.slice(0, 3).map(p => `<span class="pt ${o.part_source === '押货' ? 'purple' : ''}">${esc(p.part_name)} ×${num(p.qty)}</span>`).join('')}${parts.length > 3 ? `<span class="pt">+${parts.length - 3}</span>` : ''}</div>` : ''}
       <div class="divider"></div>
       <div class="three">
@@ -1526,15 +1534,21 @@ function pRepair() {
   return bhead('待修', '') + `<div class="pad" style="padding-top:14px">
   <div class="sec-title" style="margin:0 0 10px"><i class="fa-solid fa-screwdriver-wrench" style="color:var(--warning)"></i>维修单待修</div>
   ${mineChips}
-  ${orders.length ? orders.map(o => { const d = daysFrom(o.order_date); const nm = (o.customer || '散客') + ' · ' + (o.brand_model || o.model || '未填机型'); return `<div class="item">
-    <div class="lr"><div class="name">${esc(nm)}</div>${badge(d + ' 天', d > 7 ? C.danger : C.warning, d > 7 ? C.dangerBg : C.warningBg)}</div>
-    <div class="sub">${esc(o.order_no || '')} · ${esc(o.order_date || '')} · 工程师 ${esc(o.engineer_name || '未指派')}</div>
-    <div class="sub">${esc(o.fault_desc || '未写故障')}</div>
+  ${orders.length ? orders.map(o => {
+      const d = daysFrom(o.order_date); const nm = (o.customer || '散客') + ' · ' + (o.brand_model || o.model || '未填机型');
+      const estTxt = (o.estimate_amount || '').trim(), est = estNum(estTxt) || num(o.income), dep = num(o.deposit_amount), due = est - dep;
+      const over = o.expect_finish_at ? Math.floor((new Date(today()) - new Date(o.expect_finish_at)) / 86400000) : null;
+      const pr = (est || num(o.income)) - oCost(o);
+      return `<div class="item">
+    <div class="lr"><div class="name">${esc(nm)}</div>${over != null && over > 0 ? badge('超期 ' + over + ' 天', C.danger, C.dangerBg) : badge(d + ' 天', d > 7 ? C.danger : C.warning, d > 7 ? C.dangerBg : C.warningBg)}</div>
+    <div class="sub">${esc(o.order_no || '')} · ${esc(o.order_date || '')} · 工程师 ${esc(o.engineer_name || '未指派')}${o.customer_source ? ' · ' + esc(o.customer_source) : ''}</div>
+    <div class="sub">${esc(o.fault_desc || '未写故障')}${o.expect_finish_at ? ' · 预计修好 ' + esc(o.expect_finish_at) : ''}</div>
     <div class="three" style="margin-top:8px">
-      <div><div class="k">报价</div><div class="v">${money(o.income)}${num(o.income) ? '' : '<span style="font-size:11px;font-weight:600;color:' + C.subText + '"> 未填</span>'}</div></div>
-      <div><div class="k">成本</div><div class="v">${money(oCost(o))}</div></div>
-      <div><div class="k">毛利</div><div class="v" style="color:${oProfit(o) >= 0 ? C.success : C.danger}">${money(oProfit(o))}</div></div>
+      <div><div class="k">总报价</div><div class="v">${estTxt ? esc(estTxt) : (num(o.income) ? money(o.income) : '待报价')}</div></div>
+      <div><div class="k">已交定金</div><div class="v" style="color:${dep ? C.success : C.subText}">${dep ? money(dep) : '未交'}</div></div>
+      <div><div class="k">待收</div><div class="v" style="color:${C.warning}">${money(due)}</div></div>
     </div>
+    <div class="sub" style="margin-top:6px">预计利润 ${money(pr)}（成本 ${money(oCost(o))}） · ${esc(o.pay_status || '未结清')}</div>
     <div class="btns" style="margin-top:10px"><button class="btn sm" data-act="fixorder" data-id="${o.id}">标记修好</button>
     <button class="btn sm line" data-act="editorder" data-id="${o.id}">修改</button></div></div>`; }).join('') : empty(mine && isEng() ? '你名下没有待修单（点「全部」看全店）' : '没有待修的维修单')}
   <div class="sec-title" style="margin:18px 0 10px"><i class="fa-solid fa-mobile-screen" style="color:var(--warning)"></i>回收待修</div>
@@ -1827,7 +1841,10 @@ const fNum = (k, l, v, ph) => `<div class="field"><label>${esc(l)}</label><input
 const fDate = (k, l, v) => `<div class="field"><label>${esc(l)}</label><input data-k="${k}" type="date" value="${esc(v || today())}"></div>`;
 const fSel = (k, l, v, opts) => `<div class="field"><label>${esc(l)}</label><select data-k="${k}">${opts.map(o => `<option value="${esc(o)}" ${String(o) === String(v) ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>`;
 const fArea = (k, l, v, ph) => `<div class="field"><label>${esc(l)}</label><textarea data-k="${k}" placeholder="${esc(ph || '')}">${esc(v || '')}</textarea></div>`;
-const fChips = (k, l, v, opts) => `<div class="field"><label>${esc(l)}</label><div class="chips" data-chips="${k}">${opts.map(o => `<button type="button" class="chip ${String(v) === String(o) ? 'on' : ''}" data-v="${esc(o)}" data-for="${k}">${esc(o)}</button>`).join('')}</div></div>`;
+const fChips = (k, l, v, opts) => {
+  const list = (v != null && v !== '' && opts.indexOf(String(v)) < 0) ? [String(v)].concat(opts) : opts;
+  return `<div class="field"><label>${esc(l)}</label><div class="chips" data-chips="${k}">${list.map(o => `<button type="button" class="chip ${String(v) === String(o) ? 'on' : ''}" data-v="${esc(o)}" data-for="${k}">${esc(o)}</button>`).join('')}</div></div>`;
+};
 const two = inner => `<div class="two">${inner}</div>`;
 const readVals = () => {
   const v = {};
@@ -1842,7 +1859,7 @@ function openDeviceForm(id) {
   const v = d || { device_type: '手机', brand: '苹果', condition_grade: '95新', status: '在库', recycle_date: today() };
   openSheet(d ? '编辑设备' : '录回收机（收机入库）',
     fChips('device_type', '设备类型', v.device_type, DEVICE_TYPES) +
-    fChips('brand', '品牌', v.brand, DEVICE_BRANDS.slice(0, 8)) +
+    fChips('brand', '品牌', v.brand, DEVICE_BRANDS) +
     fText('brand_model', '机型 *', v.brand_model, '如 iPhone 14 Pro') +
     two(fText('storage', '容量 / 配置', v.storage, '256G') + fText('color', '颜色', v.color, '黑色')) +
     fChips('condition_grade', '成色', v.condition_grade || '95新', ['全新', '99新', '95新', '9成新', '8成新', '7成新', '6成新及以下']) +
@@ -1970,7 +1987,8 @@ function openSettle(id) {
 /* ---- 工单表单 ---- */
 function openOrderForm(id) {
   const o = id ? DB.orders.find(x => x.id === id) : null;
-  const v = o || { biz_type: '维修', pay_status: '未结清', repair_status: '已修好', order_date: today(), part_source: '无', parts: [] };
+  const v = o || { biz_type: '维修', pay_status: '未结清', repair_status: '已修好', order_date: today(), part_source: '无', parts: [], deposit_amount: '', estimate_amount: '', expect_finish_at: '', customer_source: '' };
+  if (o && !o.customer) v.customer = '散客';
   if (!v.engineer_name && isEng()) v.engineer_name = SESSION.name;
   const rowHTML = (r, i) => `<div class="prow2" data-row="${i}">
     <input data-pname placeholder="配件名称" value="${esc(r.part_name || '')}">
@@ -1984,6 +2002,9 @@ function openOrderForm(id) {
     two(fText('customer', '客户 *', v.customer, '散客') + fText('customer_phone', '电话', v.customer_phone, '')) +
     fText('model', '机型 *', v.model, '如 iPhone 13') +
     fArea('fault_desc', '故障 / 项目', v.fault_desc, '维修填故障，销售/回收可空') +
+    `<div class="field"><label>客户来源</label><input data-k="customer_source" value="${esc(v.customer_source || '')}" placeholder="路过 / 抖音 / 老客户 / 同行"></div>` +
+    two(fText('estimate_amount', '总报价（可填 500-600 / 600左右）', v.estimate_amount, '待修时大概报个价') + fNum('deposit_amount', '已收定金', v.deposit_amount, '0')) +
+    `<div class="field"><label>预计修好（可空）</label><input data-k="expect_finish_at" type="date" value="${esc(v.expect_finish_at || '')}"></div>` +
     two(fNum('income', '收款金额 *', v.income, '0') + fNum('cost', '成本（不含配件）', v.cost, '0')) +
     fChips('part_source', '配件来源', v.part_source || '无', PART_SOURCES) +
     `<div class="hint" style="margin:-6px 0 12px">备货扣备件库；押货扣押货库；调货不扣库存。</div>` +
@@ -1992,14 +2013,14 @@ function openOrderForm(id) {
     fSel('engineer_name', '工程师', v.engineer_name, DB.engineers.map(e => e.name)) +
     fSel('repair_status', '状态', v.repair_status || '已修好', ['已修好', '待修', '已售出', '在库']) +
     fDate('order_date', '日期', v.order_date) +
-    fArea('note', '备注', v.note, ''),
+    fArea('remark', '备注', v.remark || v.note, ''),
     () => {
       const vals = readVals();
       const psrc = vals.part_source || v.part_source || '无';
       const parts = $$('#partrows .prow2').map(r => ({ part_name: $('[data-pname]', r).value.trim(), qty: num($('[data-pqty]', r).value), unit_cost: num($('[data-pcost]', r).value), source: v.part_source })).filter(p => p.part_name);
       if (!vals.customer) throw new Error('请填写客户');
       if (!vals.model) throw new Error('请填写机型');
-      const rec = Object.assign({}, vals, { income: num(vals.income), cost: num(vals.cost), parts, part_source: psrc });
+      const rec = Object.assign({}, vals, { income: num(vals.income), cost: num(vals.cost), deposit_amount: num(vals.deposit_amount), estimate_amount: (vals.estimate_amount || '').trim(), parts, part_source: psrc });
       if (o) { Object.assign(o, rec); log('修改工单 ' + o.order_no); }
       else {
         const seq = String(DB.orders.filter(x => x.order_date === vals.order_date).length + 1).padStart(3, '0');
@@ -2616,7 +2637,25 @@ function delPawn(id) { if (!confirm('确定删除这条押货记录？')) return
 function delFlow(id) { DB.flows = DB.flows.filter(f => f.id !== id); log('删除流水'); persist(); render(); }
 function delQuote(id) { DB.quotes = DB.quotes.filter(q => q.id !== id); log('删除报价'); persist(); render(); }
 function toggleTask(id) { const t = DB.tasks.find(x => x.id === id); if (!t) return; t.status = t.status === 'done' ? 'pending' : 'done'; log('任务' + (t.status === 'done' ? '完成' : '撤销完成') + ' ' + t.title); persist(); render(); }
-function fixOrder(id) { const o = DB.orders.find(x => x.id === id); if (o) { o.repair_status = '已修好'; log('工单修好 ' + o.order_no); persist(); render(); toast('已标记修好'); } }
+function fixOrder(id) {
+  const o = DB.orders.find(x => x.id === id); if (!o) return;
+  const est = estNum(o.estimate_amount) || num(o.income), dep = num(o.deposit_amount), due = est - dep;
+  if (due <= 0) { o.repair_status = '已修好'; log('工单修好 ' + o.order_no); persist(); render(); toast('已标记修好'); return; }
+  openSheet('修好结算 · ' + o.order_no,
+    `<div class="hint" style="margin-bottom:10px">总报价 ${esc(o.estimate_amount || '—')} · 已交定金 ${money(dep)} · 待收 ${money(due)}</div>` +
+    fNum('income', '实收总额（含定金）', num(o.income) || est, '0') +
+    fChips('pay_status', '收款状态', o.pay_status || '已结清', PAY_TYPES) +
+    fArea('remark', '备注', o.remark || '', '如 保修3个月'),
+    () => {
+      const v = readVals();
+      o.income = num(v.income) || est;
+      o.pay_status = v.pay_status || '已结清';
+      if (v.remark) o.remark = v.remark;
+      o.repair_status = '已修好';
+      log('修好结算 ' + o.order_no + ' ' + money(o.income));
+      persist(); toast('已结清并修好'); closeSheet(); render();
+    });
+}
 function fixDevice(id) { const d = DB.devices.find(x => x.id === id); if (d) { d.status = '在库'; d.repair_status = '否'; log('设备修好 ' + d.brand_model); persist(); render(); toast('已上架在库'); } }
 function sellDevice(id) {
   const d = DB.devices.find(x => x.id === id); if (!d) return;
@@ -2785,6 +2824,13 @@ document.addEventListener('click', e => {
     return;
   }
 });
+document.addEventListener('click', function (e) {
+  const chip = e.target && e.target.closest ? e.target.closest('.chip[data-for]') : null;
+  if (!chip) return;
+  const box = chip.closest('[data-chips]');
+  if (!box) return;
+  $$('.chip', box).forEach(x => x.classList.toggle('on', x === chip));
+}, true);
 $('#mask').addEventListener('click', () => { $('#mask').classList.remove('on'); $('#drawer').classList.remove('on'); });
 $('#sheetmask').addEventListener('click', closeSheet);
 window.addEventListener('hashchange', function(){ try{ ensureDB(); ghLoad(); if (ghOn()) ghAuthSync().catch(function(){}); bootAuth(); render(); }catch(e){ showFatal(e); }
