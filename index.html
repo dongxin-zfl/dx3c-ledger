@@ -1501,7 +1501,12 @@ function pRepair() {
   ${orders.length ? orders.map(o => { const d = daysFrom(o.order_date); const nm = (o.customer || '散客') + ' · ' + (o.brand_model || o.model || '未填机型'); return `<div class="item">
     <div class="lr"><div class="name">${esc(nm)}</div>${badge(d + ' 天', d > 7 ? C.danger : C.warning, d > 7 ? C.dangerBg : C.warningBg)}</div>
     <div class="sub">${esc(o.order_no || '')} · ${esc(o.order_date || '')} · 工程师 ${esc(o.engineer_name || '未指派')}</div>
-    <div class="sub">${esc(o.fault_desc || '未写故障')} · ${o.income ? '报价 ' + money(o.income) : '未报价'} · ${esc(o.pay_status || '未结清')}</div>
+    <div class="sub">${esc(o.fault_desc || '未写故障')}</div>
+    <div class="three" style="margin-top:8px">
+      <div><div class="k">报价</div><div class="v">${money(o.income)}${num(o.income) ? '' : '<span style="font-size:11px;font-weight:600;color:' + C.subText + '"> 未填</span>'}</div></div>
+      <div><div class="k">成本</div><div class="v">${money(oCost(o))}</div></div>
+      <div><div class="k">毛利</div><div class="v" style="color:${oProfit(o) >= 0 ? C.success : C.danger}">${money(oProfit(o))}</div></div>
+    </div>
     <div class="btns" style="margin-top:10px"><button class="btn sm" data-act="fixorder" data-id="${o.id}">标记修好</button>
     <button class="btn sm line" data-act="editorder" data-id="${o.id}">修改</button></div></div>`; }).join('') : empty(mine && isEng() ? '你名下没有待修单（点「全部」看全店）' : '没有待修的维修单')}
   <div class="sec-title" style="margin:18px 0 10px"><i class="fa-solid fa-mobile-screen" style="color:var(--warning)"></i>回收待修</div>
