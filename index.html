@@ -798,6 +798,31 @@ async function ghPull() {
   } catch (e) { toast('拉取失败：' + (e.message || e)); console.warn(e); }
   GH.busy = false;
 }
+/* 账号密码云端备份：auth.json 独立于账本，避免某台手机数据被覆盖后又要重设密码 */
+async function ghAuthRead() {
+  if (!ghOn() || !GH.cfg.gist_id) return null;
+  try { const g = await ghApi('GET', '/gists/' + GH.cfg.gist_id + '?t=' + Date.now()); const f = g && g.files && g.files['auth.json']; return f ? JSON.parse(f.content) : null; } catch (e) { return null; }
+}
+async function ghAuthPush() {
+  if (!ghOn() || !GH.cfg.gist_id) return;
+  try {
+    const remote = await ghAuthRead();
+    const map = Object.assign({}, remote && remote.map ? remote.map : {});
+    ensureUsers().forEach(u => { if (u.pwd) map[u.name] = u.pwd; });
+    await ghApi('PATCH', '/gists/' + GH.cfg.gist_id, { files: { 'auth.json': { content: JSON.stringify({ ts: Date.now(), map }) } } });
+  } catch (e) { console.warn('auth push', e); }
+}
+async function ghAuthSync() {
+  const obj = await ghAuthRead();
+  const rmap = (obj && obj.map) || {};
+  let changed = false, needPush = false;
+  ensureUsers().forEach(u => {
+    if (!u.pwd && rmap[u.name]) { u.pwd = rmap[u.name]; changed = true; }
+    if (u.pwd && rmap[u.name] !== u.pwd) needPush = true;   // 本机有这个密码而云端没有，顺手备份
+  });
+  if (changed) { const off = GH.off; GH.off = true; persist(); GH.off = off; }
+  if (needPush) await ghAuthPush();
+}
 let _ghTimer = 0;
 function ghSchedule() { if (!ghOn() || GH.busy) return; clearTimeout(_ghTimer); _ghTimer = setTimeout(() => { if (!GH.busy && !GH.off) ghPush(true); }, 4000); }
 function openGhForm() {
@@ -893,7 +918,7 @@ function loginPage() {
   <div class="lgfoot">忘记密码：请老板在「管理 → 账号管理 → 重置密码」清空该账号密码，本人回到这里重设。</div>
 </div>`;
 }
-function doLogin() {
+async function doLogin() {
   ensureUsers();
   const q = ($('#lg-user') ? $('#lg-user').value : '').trim();
   if (!q) { toast('请输入用户名和密码'); return; }
@@ -905,12 +930,15 @@ function doLogin() {
     const p1 = ($('#lg-p1') || {}).value || '', p2 = ($('#lg-p2') || {}).value || '';
     if (p1.length < 6) { toast('密码至少 6 位'); return; }
     if (p1 !== p2) { toast('两次输入的密码不一致'); return; }
-    u.pwd = hashPwd(p1); u.must = false; persist(); enterApp(u); toast('密码已设置，已登录');
+    u.pwd = hashPwd(p1); u.must = false; persist(); ghAuthPush(); enterApp(u); toast('密码已设置，已登录');
     return;
   }
   const p = ($('#lg-p') || {}).value || '';
   if (!p) { toast('请输入密码'); return; }
-  if (!u.pwd) { toast('该账号还没设密码，点下方「首次登录？设置密码」'); return; }
+  if (!u.pwd) {
+    try { await ghAuthSync(); } catch (e) {}
+    if (!u.pwd) { toast('该账号还没设密码，点下方「首次登录？设置密码」'); return; }
+  }
   if (u.pwd !== hashPwd(p)) { toast('密码不对，再试一次'); return; }
   enterApp(u); toast(u.name + ' 已登录');
 }
@@ -937,13 +965,13 @@ function openPwdForm() {
     if (v.old && hashPwd(v.old) !== u.pwd) throw new Error('当前密码不对');
     if (!v.np1 || v.np1.length < 6) throw new Error('新密码至少 6 位');
     if (v.np1 !== v.np2) throw new Error('两次输入不一致');
-    u.pwd = hashPwd(v.np1); u.must = false; persist(); log(SESSION.name + ' 修改密码'); toast('密码已更新'); closeSheet();
+    u.pwd = hashPwd(v.np1); u.must = false; persist(); ghAuthPush(); log(SESSION.name + ' 修改密码'); toast('密码已更新'); closeSheet();
   });
 }
 function resetPwd(id) {
   const u = ensureUsers().find(x => x.id === id); if (!u) return;
   if (!confirm('重置后该账号密码被清空，本人下次登录需重设。确定？')) return;
-  u.pwd = ''; u.must = true; persist(); log('重置密码 ' + u.name); toast('已重置 ' + u.name); go('/accounts');
+  u.pwd = ''; u.must = true; persist(); ghAuthPush(); log('重置密码 ' + u.name); toast('已重置 ' + u.name); go('/accounts');
 }
 function toggleRole(id) {
   const u = ensureUsers().find(x => x.id === id); if (!u) return;
@@ -2759,7 +2787,7 @@ document.addEventListener('click', e => {
 });
 $('#mask').addEventListener('click', () => { $('#mask').classList.remove('on'); $('#drawer').classList.remove('on'); });
 $('#sheetmask').addEventListener('click', closeSheet);
-window.addEventListener('hashchange', function(){ try{ ensureDB(); ghLoad(); bootAuth(); render(); }catch(e){ showFatal(e); }
+window.addEventListener('hashchange', function(){ try{ ensureDB(); ghLoad(); if (ghOn()) ghAuthSync().catch(function(){}); bootAuth(); render(); }catch(e){ showFatal(e); }
  });
 function showFatal(e){
   try{
@@ -2770,7 +2798,7 @@ function showFatal(e){
   }catch(x){}
 }
 window.addEventListener('error', function(ev){ if(!document.querySelector('#tabbar') && !document.querySelector('.hero')) return; });
-try{ ensureDB(); ghLoad(); bootAuth(); render(); }catch(e){ showFatal(e); }
+try{ ensureDB(); ghLoad(); if (ghOn()) ghAuthSync().catch(function(){}); bootAuth(); render(); }catch(e){ showFatal(e); }
 
 </script>
 </body>
